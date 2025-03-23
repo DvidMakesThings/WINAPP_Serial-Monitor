@@ -1,5 +1,6 @@
 import serial
 import threading
+import time
 
 class SerialComm:
     def __init__(self, port_combo, baud_combo, connect_button, terminal, port_map, get_button_style):
@@ -15,31 +16,29 @@ class SerialComm:
         self.running = False
         self.serial_thread = None
         self.reconnect_thread = None
+        self.last_port = None
+        self.last_baud = None
 
-    def connect(self):
-        selected_desc = self.port_combo.currentText()
-        port = self.port_map.get(selected_desc, None)
-        baud = int(self.baud_combo.currentText())  # Convert selected baud rate to integer
-
+    def connect(self, port, baud):
         if not port:
-            self.terminal.append("⚠ No port selected.")
+            self.terminal.after(0, lambda: self.terminal.append("⚠ No port selected."))
             return False
 
         try:
             self.serial_port = serial.Serial(port, baud, timeout=0.1)
             self.running = True
-            self.connect_button.setText("Disconnect")
-            self.connect_button.setStyleSheet(self.get_button_style("red"))
-            self.terminal.append(f"✅ Connected to {port} @ {baud} baud")
-
-            self.port_combo.setEnabled(False)
-            self.baud_combo.setEnabled(False)
-
+            self.last_port = port
+            self.last_baud = baud
+            self.connect_button.after(0, lambda: self.connect_button.configure(
+                text="Disconnect", fg_color=self.get_button_style("red")[0]
+            ))
+            self.terminal.after(0, lambda: self.terminal.append(f"✅ Connected to {port} @ {baud} baud"))
+            # Start the serial reading thread
             self.serial_thread = threading.Thread(target=self.read_serial, daemon=True)
             self.serial_thread.start()
             return True
         except serial.SerialException:
-            self.terminal.append(f"❌ Failed to connect to {port}. Retrying...")
+            self.terminal.after(0, lambda: self.terminal.append(f"❌ Failed to connect to {port}. Retrying..."))
             self.start_reconnect_thread()
             return False
 
@@ -48,13 +47,10 @@ class SerialComm:
         if self.serial_port:
             self.serial_port.close()
             self.serial_port = None
-        self.connect_button.setText("Connect")
-        self.connect_button.setStyleSheet(self.get_button_style("green"))
-        self.terminal.append("🔌 Disconnected.")
-
-        # Re-enable COM port and baud rate selection when disconnected
-        self.port_combo.setEnabled(True)
-        self.baud_combo.setEnabled(True)
+        self.connect_button.after(0, lambda: self.connect_button.configure(
+            text="Connect", fg_color=self.get_button_style("green")[0]
+        ))
+        self.terminal.after(0, lambda: self.terminal.append("🔌 Disconnected."))
 
     def start_reconnect_thread(self):
         if self.reconnect_thread and self.reconnect_thread.is_alive():
@@ -63,23 +59,20 @@ class SerialComm:
         self.reconnect_thread.start()
 
     def reconnect_serial(self):
+        # Continuously try to reconnect using the last known port and baud
         while not self.running:
-            selected_desc = self.port_combo.currentText()
-            port = self.port_map.get(selected_desc, None)
-            baud = int(self.baud_combo.currentText())
-            if port:
-                try:
-                    self.serial_port = serial.Serial(port, baud, timeout=0.1)
-                    self.running = True
-                    self.connect_button.setText("Disconnect")
-                    self.connect_button.setStyleSheet(self.get_button_style("red"))
-                    self.terminal.append(f"✅ Reconnected to {port}")
-
-                    self.serial_thread = threading.Thread(target=self.read_serial, daemon=True)
-                    self.serial_thread.start()
-                    return
-                except serial.SerialException:
-                    pass  # Keep trying instantly
+            try:
+                self.serial_port = serial.Serial(self.last_port, self.last_baud, timeout=0.1)
+                self.running = True
+                self.connect_button.after(0, lambda: self.connect_button.configure(
+                    text="Disconnect", fg_color=self.get_button_style("red")[0]
+                ))
+                self.terminal.after(0, lambda: self.terminal.append(f"✅ Reconnected to {self.last_port}"))
+                self.serial_thread = threading.Thread(target=self.read_serial, daemon=True)
+                self.serial_thread.start()
+                return
+            except serial.SerialException:
+                time.sleep(1)
 
     def read_serial(self):
         while self.running and self.serial_port:
@@ -87,11 +80,10 @@ class SerialComm:
                 if self.serial_port.in_waiting > 0:
                     data = self.serial_port.read(self.serial_port.in_waiting).decode('utf-8', errors='ignore')
                     if data:
-                        # Use insertPlainText to preserve multiple \n characters
-                        self.terminal.insertPlainText(data)
-                        self.terminal.verticalScrollBar().setValue(self.terminal.verticalScrollBar().maximum())
+                        # Capture data in default argument to avoid late binding issues
+                        self.terminal.after(0, lambda d=data: self.terminal.insertPlainText(d))
             except serial.SerialException:
-                self.terminal.append("⚠ Device disconnected. Reconnecting...")
+                self.terminal.after(0, lambda: self.terminal.append("⚠ Device disconnected. Reconnecting..."))
                 self.running = False
                 self.start_reconnect_thread()
                 break
@@ -100,6 +92,6 @@ class SerialComm:
         if self.serial_port and self.serial_port.is_open:
             try:
                 self.serial_port.write(message.encode('utf-8'))
-                self.terminal.append(f"➡ {message.strip()}")
+                self.terminal.after(0, lambda: self.terminal.append(f"➡ {message.strip()}"))
             except serial.SerialException:
-                self.terminal.append("⚠ Failed to send message.")
+                self.terminal.after(0, lambda: self.terminal.append("⚠ Failed to send message."))

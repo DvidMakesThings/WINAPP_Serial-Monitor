@@ -1,4 +1,5 @@
 pyqt6 
 pyserial 
+serial
 pandas 
 openpyxl
