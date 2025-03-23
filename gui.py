@@ -16,27 +16,25 @@ class SerialMonitorGUI(ctk.CTk):
 
         self.serial_comm = None
         self.port_map = {}
+        # This will hold the full port string for the currently selected port.
+        self.selected_port_full = ""
 
         # ----- Top Frame: Controls (re-organized using grid) -----
-        # This frame now has three rows:
         # Row 0: Port label and OptionMenu
         # Row 1: Baud label and OptionMenu
         # Row 2: Refresh and Connect buttons
         self.top_frame = ctk.CTkFrame(self, fg_color="#222", border_width=0)
         self.top_frame.pack(fill="x", padx=10, pady=5)
         
-        # Row 0: Port label and OptionMenu
-        port_label = ctk.CTkLabel(
-            self.top_frame, text="Port:", fg_color="#222", text_color="white", font=("Helvetica", 14)
-        )
+        # Row 0: Port label and OptionMenu with a command callback.
+        port_label = ctk.CTkLabel(self.top_frame, text="Port:", fg_color="#222", text_color="white", font=("Helvetica", 14))
         port_label.grid(row=0, column=0, padx=5, pady=2, sticky="w")
-        self.port_combo = ctk.CTkOptionMenu(self.top_frame, values=[], font=("Helvetica", 14))
+        # Set command to on_port_selected to capture full value and update display.
+        self.port_combo = ctk.CTkOptionMenu(self.top_frame, values=[], font=("Helvetica", 14), command=self.on_port_selected)
         self.port_combo.grid(row=0, column=1, padx=5, pady=2, sticky="ew")
         
         # Row 1: Baud label and OptionMenu
-        baud_label = ctk.CTkLabel(
-            self.top_frame, text="Baud:", fg_color="#222", text_color="white", font=("Helvetica", 14)
-        )
+        baud_label = ctk.CTkLabel(self.top_frame, text="Baud:", fg_color="#222", text_color="white", font=("Helvetica", 14))
         baud_label.grid(row=1, column=0, padx=5, pady=2, sticky="w")
         standard_baud_rates = [110, 300, 600, 1200, 2400, 4800, 9600, 14400, 19200,
                                  38400, 57600, 115200, 128000, 256000]
@@ -46,72 +44,51 @@ class SerialMonitorGUI(ctk.CTk):
         self.baud_combo.grid(row=1, column=1, padx=5, pady=2, sticky="ew")
         
         # Row 2: Refresh and Connect buttons
-        self.refresh_button = ctk.CTkButton(
-            self.top_frame, text="Refresh Ports", command=self.refresh_ports,
-            fg_color="#009600", hover_color="#006400", font=("Helvetica", 14)
-        )
+        self.refresh_button = ctk.CTkButton(self.top_frame, text="Refresh Ports", command=self.refresh_ports,
+                                            fg_color="#009600", hover_color="#006400", font=("Helvetica", 14))
         self.refresh_button.grid(row=2, column=0, padx=5, pady=2, sticky="ew")
-        self.connect_button = ctk.CTkButton(
-            self.top_frame, text="Connect", command=self.toggle_connection,
-            fg_color="#009600", hover_color="#006400", font=("Helvetica", 14)
-        )
+        self.connect_button = ctk.CTkButton(self.top_frame, text="Connect", command=self.toggle_connection,
+                                            fg_color="#009600", hover_color="#006400", font=("Helvetica", 14))
         self.connect_button.grid(row=2, column=1, padx=5, pady=2, sticky="ew")
         
-        # Allow the second column to expand more for long port descriptions
+        # Allow the second column to expand more (for long port descriptions)
         self.top_frame.grid_columnconfigure(0, weight=1)
         self.top_frame.grid_columnconfigure(1, weight=3)
         
         # ----- Middle Frame: Terminal -----
         self.middle_frame = ctk.CTkFrame(self, fg_color="#222", border_width=0)
         self.middle_frame.pack(fill="both", expand=True, padx=10, pady=5)
-        self.terminal = tk.Text(
-            self.middle_frame,
-            bg="#111",
-            fg="#0f0",
-            font=("Courier", 12),
-            state="disabled",
-            bd=0,  # remove border
-            highlightthickness=0
-        )
+        self.terminal = tk.Text(self.middle_frame, bg="#111", fg="#0f0",
+                                font=("Courier", 12), state="disabled", bd=0, highlightthickness=0)
         self.terminal.pack(side="left", fill="both", expand=True)
         scrollbar = tk.Scrollbar(self.middle_frame, command=self.terminal.yview)
         scrollbar.pack(side="right", fill="y")
         self.terminal.config(yscrollcommand=scrollbar.set)
-        # Patch the terminal with helper methods so SerialComm can call .append() and .insertPlainText()
+        # Patch the terminal with helper methods
         self.terminal.append = self.append_text
         self.terminal.insertPlainText = self.insert_plain_text
 
         # ----- Input Frame: Dedicated row for user input and Send button -----
         self.input_frame = ctk.CTkFrame(self, fg_color="#222", border_width=0)
         self.input_frame.pack(fill="x", padx=10, pady=5)
-        self.message_input = ctk.CTkEntry(
-            self.input_frame, placeholder_text="Type a message...", font=("Helvetica", 14)
-        )
+        self.message_input = ctk.CTkEntry(self.input_frame, placeholder_text="Type a message...", font=("Helvetica", 14))
         self.message_input.pack(side="left", fill="x", expand=True, padx=5)
         self.message_input.bind("<Return>", lambda event: self.send_message())
-        self.send_button = ctk.CTkButton(
-            self.input_frame, text="Send", width=80,
-            command=self.send_message, fg_color="#009600", hover_color="#006400", font=("Helvetica", 14)
-        )
+        self.send_button = ctk.CTkButton(self.input_frame, text="Send", width=80,
+                                         command=self.send_message, fg_color="#009600", hover_color="#006400", font=("Helvetica", 14))
         self.send_button.pack(side="left", padx=5)
 
         # ----- Bottom Frame: Clear Terminal, Save Log, and Auto Append checkbox -----
         self.bottom_frame = ctk.CTkFrame(self, fg_color="#222", border_width=0)
         self.bottom_frame.pack(fill="x", padx=10, pady=5)
-        self.clear_button = ctk.CTkButton(
-            self.bottom_frame, text="Clear Terminal", width=120,
-            command=self.clear_terminal, fg_color="#009600", hover_color="#006400", font=("Helvetica", 14)
-        )
+        self.clear_button = ctk.CTkButton(self.bottom_frame, text="Clear Terminal", width=120,
+                                          command=self.clear_terminal, fg_color="#009600", hover_color="#006400", font=("Helvetica", 14))
         self.clear_button.pack(side="left", padx=5)
-        self.save_button = ctk.CTkButton(
-            self.bottom_frame, text="Save Log", width=120,
-            command=self.handle_save_log, fg_color="#0064C8", hover_color="#004696", font=("Helvetica", 14)
-        )
+        self.save_button = ctk.CTkButton(self.bottom_frame, text="Save Log", width=120,
+                                         command=self.handle_save_log, fg_color="#0064C8", hover_color="#004696", font=("Helvetica", 14))
         self.save_button.pack(side="left", padx=5)
-        self.auto_terminate = ctk.CTkCheckBox(
-            self.bottom_frame, text="Auto append \\r\\n",
-            font=("Helvetica", 14), text_color="white", fg_color="#222"
-        )
+        self.auto_terminate = ctk.CTkCheckBox(self.bottom_frame, text="Auto append \\r\\n",
+                                              font=("Helvetica", 14), text_color="white", fg_color="#222")
         self.auto_terminate.select()
         self.auto_terminate.pack(side="left", padx=5)
 
@@ -119,13 +96,24 @@ class SerialMonitorGUI(ctk.CTk):
         self.refresh_ports()
 
     def center_window(self, width, height):
-        # Get screen width and height
+        # Get screen width and height and center the window
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
-        # Calculate position x and y coordinates to center the window
         x = (screen_width - width) // 2
-        y = (screen_height - height) // 2
+        y = (screen_height - height) // 2 - 50
         self.geometry(f"{width}x{height}+{x}+{y}")
+
+    def truncate_text(self, text, max_length=40):
+        """Return truncated text with ellipsis if longer than max_length."""
+        if len(text) > max_length:
+            return text[:max_length-3] + "..."
+        return text
+
+    def on_port_selected(self, selection):
+        """Callback when a port is selected from the dropdown.
+           Store the full text and update the displayed value to a truncated version."""
+        self.selected_port_full = selection
+        self.port_combo.set(self.truncate_text(selection))
 
     def append_text(self, text):
         self.terminal.config(state="normal")
@@ -145,7 +133,7 @@ class SerialMonitorGUI(ctk.CTk):
         self.terminal.config(state="disabled")
 
     def refresh_ports(self):
-        """ Refresh the list of available COM ports with names. """
+        """Refresh the list of available COM ports with names."""
         self.port_map.clear()
         ports = serial.tools.list_ports.comports()
         port_values = []
@@ -153,7 +141,7 @@ class SerialMonitorGUI(ctk.CTk):
             desc = f"{port.device} - {port.description}"
             self.port_map[desc] = port.device
             port_values.append(desc)
-        # Added Linux support: Append common Linux serial ports if not already detected
+        # Linux support: Append common Linux serial ports if not already detected
         if platform.system() == "Linux":
             common_ports = ["/dev/ttyUSB0", "/dev/ttyACM0", "/dev/ttyS0"]
             for p in common_ports:
@@ -163,7 +151,9 @@ class SerialMonitorGUI(ctk.CTk):
                     port_values.append(desc)
         self.port_combo.configure(values=port_values)
         if port_values:
-            self.port_combo.set(port_values[0])
+            # Store full value and display truncated version
+            self.selected_port_full = port_values[0]
+            self.port_combo.set(self.truncate_text(port_values[0]))
         else:
             self.port_combo.set("")
 
@@ -174,7 +164,8 @@ class SerialMonitorGUI(ctk.CTk):
             self.connect_serial()
 
     def connect_serial(self):
-        selected_desc = self.port_combo.get()
+        # Use the stored full port name if available; otherwise, fallback to the current OptionMenu text
+        selected_desc = self.selected_port_full if self.selected_port_full else self.port_combo.get()
         if not selected_desc:
             self.append_text("⚠ No port selected.")
             return
