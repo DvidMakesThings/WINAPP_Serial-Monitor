@@ -22,14 +22,16 @@ class DataVisualizer:
         self.ax.set_ylabel(self.y_axis)
         self.ax.set_title(f"Real-time Plot for '{self.keyword}'")
         
-        # Start animation; update_plot is called every 1000ms
-        self.ani = animation.FuncAnimation(self.fig, self.update_plot, interval=1000, blit=False)
+        # Disable caching frame data to suppress the warning.
+        self.ani = animation.FuncAnimation(
+            self.fig, self.update_plot, interval=1000, blit=False, cache_frame_data=False
+        )
         plt.show(block=False)
 
     def add_data(self, message):
         """
         Check if the message contains the keyword. If so, extract the first number found
-        and add it to the plot data. X-axis is current time.
+        and add it to the plot data. The x-axis is the current time.
         """
         if self.keyword in message:
             match = re.search(r"([-+]?\d*\.\d+|\d+)", message)

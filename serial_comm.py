@@ -33,7 +33,6 @@ class SerialComm:
                 text="Disconnect", fg_color=self.get_button_style("red")[0]
             ))
             self.terminal.after(0, lambda: self.terminal.append(f"✅ Connected to {port} @ {baud} baud"))
-            # Start the serial reading thread
             self.serial_thread = threading.Thread(target=self.read_serial, daemon=True)
             self.serial_thread.start()
             return True
@@ -59,7 +58,6 @@ class SerialComm:
         self.reconnect_thread.start()
 
     def reconnect_serial(self):
-        # Continuously try to reconnect using the last known port and baud
         while not self.running:
             try:
                 self.serial_port = serial.Serial(self.last_port, self.last_baud, timeout=0.1)
@@ -80,8 +78,11 @@ class SerialComm:
                 if self.serial_port.in_waiting > 0:
                     data = self.serial_port.read(self.serial_port.in_waiting).decode('utf-8', errors='ignore')
                     if data:
-                        # Capture data in default argument to avoid late binding issues
-                        self.terminal.after(0, lambda d=data: self.terminal.insertPlainText(d))
+                        # Split incoming data by newlines so that each line is processed individually
+                        lines = data.splitlines()
+                        for line in lines:
+                            # Use lambda default parameter binding to capture the current line
+                            self.terminal.after(0, lambda l=line: self.terminal.append(l))
             except serial.SerialException:
                 self.terminal.after(0, lambda: self.terminal.append("⚠ Device disconnected. Reconnecting..."))
                 self.running = False

@@ -1,5 +1,5 @@
 # Window dimensions
-WINDOW_WIDTH = 500
+WINDOW_WIDTH = 600
 WINDOW_HEIGHT = 750
 
 # Fonts
