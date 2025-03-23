@@ -3,7 +3,7 @@ WINDOW_WIDTH = 500
 WINDOW_HEIGHT = 750
 
 # Fonts
-DEFAULT_FONT = ("Helvetica", 14)
+DEFAULT_FONT = ("Helvetica", 12)
 
 # Colors
 BG_COLOR = "#222"
