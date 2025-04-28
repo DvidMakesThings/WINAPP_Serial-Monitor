@@ -1,8 +1,8 @@
-# Serial Monitor - Python (PyQt6)
+# Serial Monitor - Python (customtkinter)
 
 ## Overview
 
-This Serial Monitor is a GUI application built with PyQt6 and pySerial for communicating with serial devices. It was born out of frustration with the buggy and unreliable serial monitor in Visual Studio Code, which constantly disconnected, lagged, and failed to display messages correctly.
+This Serial Monitor is a GUI application built with customtkinter and pySerial for communicating with serial devices. It was born out of frustration with the buggy and unreliable serial monitor in Visual Studio Code, which constantly disconnected, lagged, and failed to display messages correctly.
 
 Tired of dealing with those issues, this custom serial monitor was created to be fast, reliable, and hassle-free. It features an intuitive dark-themed interface, real-time message handling, automatic reconnection, and logging capabilities. Whether you're debugging embedded systems or testing serial communication, this tool ensures a smooth and frustration-free experience.
 
@@ -46,7 +46,7 @@ python serial_monitor.py
 
 ### User Interface
 
-- Built using PyQt6 with a dark theme.
+- Built using customtkinter with a dark theme.
 - Dropdown selection for available COM ports and baud rate configuration.
 - Styled buttons for clear, save, send, and connect/disconnect actions.
 - Terminal window displaying incoming messages with auto-scroll.
