@@ -10,28 +10,41 @@ class ScrollController:
         self.buffer = ""
 
     def pause(self):
-        """Pause auto-scrolling."""
+        """Pause auto‐scrolling."""
         self.paused = True
 
     def resume(self):
-        """Resume auto-scrolling and flush any buffered messages."""
+        """Resume auto‐scrolling and flush any buffered messages."""
         self.paused = False
         self.flush_buffer()
 
     def flush_buffer(self):
-        """Insert any buffered text into the terminal."""
-        if self.buffer:
-            self.text_widget.insert(tk.END, self.buffer)
-            self.text_widget.see(tk.END)
-            self.buffer = ""
+        """Insert any buffered text (which already contains \n) into the terminal."""
+        if not self.buffer:
+            return
+        self.text_widget.config(state="normal")
+        self.text_widget.insert(tk.END, self.buffer)
+        self.text_widget.see(tk.END)
+        self.text_widget.config(state="disabled")
+        self.buffer = ""
 
     def append(self, text):
         """
-        Append text to the terminal. If paused, store it in a buffer.
-        Otherwise, insert immediately.
+        Append *exact* text into the terminal. Incoming text may include '\n'.
+        If paused, buffer it verbatim.
         """
         if self.paused:
-            self.buffer += text + "\n"
+            self.buffer += text
         else:
-            self.text_widget.insert(tk.END, text + "\n")
+            self.text_widget.config(state="normal")
+            self.text_widget.insert(tk.END, text)
             self.text_widget.see(tk.END)
+            self.text_widget.config(state="disabled")
+
+            # trim oldest lines if we're over the cap
+            max_lines = 10000
+            curr = int(self.text_widget.index('end-1c').split('.')[0])
+            if curr > max_lines:
+                self.text_widget.config(state="normal")
+                self.text_widget.delete('1.0', f'{curr-max_lines}.0')
+                self.text_widget.config(state="disabled")

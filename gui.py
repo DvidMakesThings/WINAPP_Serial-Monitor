@@ -6,6 +6,10 @@ from serial_comm import SerialComm
 from file_handler import save_log
 import platform
 import config  # Import our configuration settings
+from scroll_pause import ScrollController
+from command_manager import CommandManager
+import tkinter as tk
+
 
 class SerialMonitorGUI(ctk.CTk):
     def __init__(self):
@@ -19,96 +23,191 @@ class SerialMonitorGUI(ctk.CTk):
         self.port_map = {}
         self.selected_port_full = ""
 
-        # ----- Top Frame: Controls (organized using grid) -----
+        # ----- Top Frame: Controls (Port/Refresh under one column, Baud/Connect under another) -----
         self.top_frame = ctk.CTkFrame(self, fg_color=config.BG_COLOR, border_width=0)
         self.top_frame.pack(fill="x", padx=10, pady=5)
-        
-        # Row 0: Port label and OptionMenu with command callback
-        port_label = ctk.CTkLabel(self.top_frame, text="Port:", fg_color=config.BG_COLOR,
-                                  text_color="white", font=config.DEFAULT_FONT)
-        port_label.grid(row=0, column=0, padx=5, pady=2, sticky="w")
-        self.port_combo = ctk.CTkOptionMenu(self.top_frame, values=[], font=config.DEFAULT_FONT,
-                                           command=self.on_port_selected)
-        self.port_combo.grid(row=0, column=1, padx=5, pady=2, sticky="ew")
-        
-        # Row 1: Baud label and OptionMenu
-        baud_label = ctk.CTkLabel(self.top_frame, text="Baud:", fg_color=config.BG_COLOR,
-                                  text_color="white", font=config.DEFAULT_FONT)
-        baud_label.grid(row=1, column=0, padx=5, pady=2, sticky="w")
-        standard_baud_rates = [110, 300, 600, 1200, 2400, 4800, 9600, 14400, 19200,
-                                 38400, 57600, 115200, 128000, 256000]
-        baud_values = [str(b) for b in standard_baud_rates]
-        self.baud_combo = ctk.CTkOptionMenu(self.top_frame, values=baud_values, font=config.DEFAULT_FONT)
+
+        # Columns 0–4 fixed, 5 expands
+        for col in range(5):
+            self.top_frame.grid_columnconfigure(col, weight=0)
+        self.top_frame.grid_columnconfigure(5, weight=1)
+
+        # Row 0: Port & Baud selectors
+        ctk.CTkLabel(self.top_frame, text="Port:", fg_color=config.BG_COLOR,
+                     text_color="white", font=config.DEFAULT_FONT) \
+            .grid(row=0, column=0, padx=(0,5), pady=2, sticky="w")
+        self.port_combo = ctk.CTkOptionMenu(
+            self.top_frame, values=[], width=180, font=config.DEFAULT_FONT,
+            command=self.on_port_selected
+        )
+        self.port_combo.grid(row=0, column=1, padx=(0,15), pady=2, sticky="w")
+
+        ctk.CTkLabel(self.top_frame, text="Baud:", fg_color=config.BG_COLOR,
+                     text_color="white", font=config.DEFAULT_FONT) \
+            .grid(row=0, column=3, padx=(0,5), pady=2, sticky="w")
+        standard_baud_rates = [110,300,600,1200,2400,4800,9600,14400,19200,38400,57600,115200,128000,256000]
+        self.baud_combo = ctk.CTkOptionMenu(
+            self.top_frame, values=[str(b) for b in standard_baud_rates],
+            width=100, font=config.DEFAULT_FONT
+        )
         self.baud_combo.set("115200")
-        self.baud_combo.grid(row=1, column=1, padx=5, pady=2, sticky="ew")
-        
-        # Row 2: Refresh and Connect buttons
-        self.refresh_button = ctk.CTkButton(self.top_frame, text="Refresh Ports",
-                                            command=self.refresh_ports,
-                                            fg_color=config.BUTTON_STYLES["green"][0],
-                                            hover_color=config.BUTTON_STYLES["green"][1],
-                                            font=config.DEFAULT_FONT)
-        self.refresh_button.grid(row=2, column=0, padx=5, pady=2, sticky="ew")
-        self.connect_button = ctk.CTkButton(self.top_frame, text="Connect",
-                                            command=self.toggle_connection,
-                                            fg_color=config.BUTTON_STYLES["green"][0],
-                                            hover_color=config.BUTTON_STYLES["green"][1],
-                                            font=config.DEFAULT_FONT)
-        self.connect_button.grid(row=2, column=1, padx=5, pady=2, sticky="ew")
-        
-        # Configure grid columns
-        self.top_frame.grid_columnconfigure(0, weight=1)
-        self.top_frame.grid_columnconfigure(1, weight=3)
-        
-        # ----- Middle Frame: Terminal -----
+        self.baud_combo.grid(row=0, column=4, padx=(0,5), pady=2, sticky="w")
+
+        # Row 1: Buttons under the selectors
+        self.refresh_button = ctk.CTkButton(
+            self.top_frame, text="Refresh Ports", width=180,
+            command=self.refresh_ports,
+            fg_color=config.BUTTON_STYLES["green"][0],
+            hover_color=config.BUTTON_STYLES["green"][1],
+            font=config.DEFAULT_FONT
+        )
+        self.refresh_button.grid(row=1, column=1, padx=(0,5), pady=2, sticky="w")
+
+        self.connect_button = ctk.CTkButton(
+            self.top_frame, text="Connect", width=100,
+            command=self.toggle_connection,
+            fg_color=config.BUTTON_STYLES["green"][0],
+            hover_color=config.BUTTON_STYLES["green"][1],
+            font=config.DEFAULT_FONT
+        )
+        self.connect_button.grid(row=1, column=4, padx=(0,5), pady=2, sticky="w")
+
+        # Expanding spacer
+        ctk.CTkLabel(self.top_frame, text="", fg_color=config.BG_COLOR) \
+            .grid(row=0, column=5, rowspan=2, sticky="nsew")
+
+        # ----- Middle Frame: Terminal with no-wrap + dual scrollbars -----
         self.middle_frame = ctk.CTkFrame(self, fg_color=config.BG_COLOR, border_width=0)
         self.middle_frame.pack(fill="both", expand=True, padx=10, pady=5)
-        self.terminal = tk.Text(self.middle_frame, bg=config.TERMINAL_BG, fg=config.TERMINAL_FG,
-                                font=("Courier", 12), state="disabled", bd=0, highlightthickness=0)
-        self.terminal.pack(side="left", fill="both", expand=True)
-        scrollbar = tk.Scrollbar(self.middle_frame, command=self.terminal.yview)
-        scrollbar.pack(side="right", fill="y")
-        self.terminal.config(yscrollcommand=scrollbar.set)
-        self.terminal.append = self.append_text
-        self.terminal.insertPlainText = self.insert_plain_text
+        self.middle_frame.grid_columnconfigure(0, weight=1)
+        self.middle_frame.grid_rowconfigure(0, weight=1)
 
-        # ----- Input Frame: User input and Send button -----
+        self.terminal = tk.Text(
+            self.middle_frame,
+            bg=config.TERMINAL_BG,
+            fg=config.TERMINAL_FG,
+            font=("Courier", 10),
+            state="disabled",
+            bd=0,
+            highlightthickness=0,
+            wrap="none"
+        )
+        self.terminal.grid(row=0, column=0, sticky="nsew")
+
+        v_scroll = tk.Scrollbar(self.middle_frame, orient="vertical", command=self.terminal.yview)
+        v_scroll.grid(row=0, column=1, sticky="ns")
+        h_scroll = tk.Scrollbar(self.middle_frame, orient="horizontal", command=self.terminal.xview)
+        h_scroll.grid(row=1, column=0, sticky="ew")
+
+        self.terminal.config(yscrollcommand=v_scroll.set, xscrollcommand=h_scroll.set)
+        self.scroll_controller = ScrollController(self.terminal)
+        self.terminal.append = self.scroll_controller.append
+        self.terminal.insertPlainText = self.scroll_controller.append
+        self._partial_line = ""
+
+        # ----- Input Frame: User input, Send button, and new command UI -----
         self.input_frame = ctk.CTkFrame(self, fg_color=config.BG_COLOR, border_width=0)
         self.input_frame.pack(fill="x", padx=10, pady=5)
-        self.message_input = ctk.CTkEntry(self.input_frame, placeholder_text="Type a message...",
-                                           font=config.DEFAULT_FONT)
+
+        # Message entry + Send
+        self.message_input = ctk.CTkEntry(
+            self.input_frame, placeholder_text="Type a message.",
+            font=config.DEFAULT_FONT
+        )
         self.message_input.pack(side="left", fill="x", expand=True, padx=5)
-        self.message_input.bind("<Return>", lambda event: self.send_message())
-        self.send_button = ctk.CTkButton(self.input_frame, text="Send", width=80,
-                                         command=self.send_message,
-                                         fg_color=config.BUTTON_STYLES["green"][0],
-                                         hover_color=config.BUTTON_STYLES["green"][1],
-                                         font=config.DEFAULT_FONT)
+        self.message_input.bind("<Return>", lambda e: self.send_message())
+        self.send_button = ctk.CTkButton(
+            self.input_frame, text="Send", width=80,
+            command=self.send_message,
+            fg_color=config.BUTTON_STYLES["green"][0],
+            hover_color=config.BUTTON_STYLES["green"][1],
+            font=config.DEFAULT_FONT
+        )
         self.send_button.pack(side="left", padx=5)
+
+        # ---- COMMAND HISTORY ----
+        self.command_history = []
+        self.history_index = -1
+        self.message_input.bind("<Up>", self.on_history_up)
+        self.message_input.bind("<Down>", self.on_history_down)
+
+        # --- Command Manager & UI (now that input_frame exists) ---
+        self.cmd_manager = CommandManager()
+        self.cmd_dropdown = ctk.CTkOptionMenu(
+            self.input_frame,
+            values=self.cmd_manager.names(),
+            width=200,
+            font=config.DEFAULT_FONT
+        )
+        self.cmd_dropdown.set("")
+        self.cmd_dropdown.pack(side="left", padx=5)
+
+        self.add_cmd_button = ctk.CTkButton(
+            self.input_frame, text="Add Command", width=100,
+            command=self.open_add_command_window,
+            fg_color=config.BUTTON_STYLES["blue"][0],
+            hover_color=config.BUTTON_STYLES["blue"][1],
+            font=config.DEFAULT_FONT
+        )
+        self.add_cmd_button.pack(side="left", padx=5)
+
+        # Repeat controls
+        self.repeat_var = tk.BooleanVar(value=False)
+        self.repeat_checkbox = ctk.CTkCheckBox(
+            self.input_frame, text="Repeat",
+            variable=self.repeat_var,
+            font=config.DEFAULT_FONT,
+            text_color="white", fg_color=config.BG_COLOR
+        )
+        self.repeat_checkbox.pack(side="left", padx=(15,5))
+        self.interval_entry = ctk.CTkEntry(
+            self.input_frame, width=80,
+            placeholder_text="Interval ms",
+            font=config.DEFAULT_FONT
+        )
+        self.interval_entry.insert(0, "1000")
+        self.interval_entry.pack(side="left", padx=5)
+        self.stop_repeat_button = ctk.CTkButton(
+            self.input_frame, text="Stop Repeat", width=100,
+            command=self.stop_repeat,
+            fg_color=config.BUTTON_STYLES["red"][0],
+            hover_color=config.BUTTON_STYLES["red"][1],
+            font=config.DEFAULT_FONT,
+            state="disabled"
+        )
+        self.stop_repeat_button.pack(side="left", padx=5)
 
         # ----- Bottom Frame: Clear Terminal, Save Log, Auto Append -----
         self.bottom_frame = ctk.CTkFrame(self, fg_color=config.BG_COLOR, border_width=0)
         self.bottom_frame.pack(fill="x", padx=10, pady=5)
-        self.clear_button = ctk.CTkButton(self.bottom_frame, text="Clear Terminal", width=120,
-                                          command=self.clear_terminal,
-                                          fg_color=config.BUTTON_STYLES["green"][0],
-                                          hover_color=config.BUTTON_STYLES["green"][1],
-                                          font=config.DEFAULT_FONT)
+        self.clear_button = ctk.CTkButton(
+            self.bottom_frame, text="Clear Terminal", width=120,
+            command=self.clear_terminal,
+            fg_color=config.BUTTON_STYLES["green"][0],
+            hover_color=config.BUTTON_STYLES["green"][1],
+            font=config.DEFAULT_FONT
+        )
         self.clear_button.pack(side="left", padx=5)
-        self.save_button = ctk.CTkButton(self.bottom_frame, text="Save Log", width=120,
-                                         command=self.handle_save_log,
-                                         fg_color=config.BUTTON_STYLES["blue"][0],
-                                         hover_color=config.BUTTON_STYLES["blue"][1],
-                                         font=config.DEFAULT_FONT)
+        self.save_button = ctk.CTkButton(
+            self.bottom_frame, text="Save Log", width=120,
+            command=self.handle_save_log,
+            fg_color=config.BUTTON_STYLES["blue"][0],
+            hover_color=config.BUTTON_STYLES["blue"][1],
+            font=config.DEFAULT_FONT
+        )
         self.save_button.pack(side="left", padx=5)
-        self.auto_terminate = ctk.CTkCheckBox(self.bottom_frame, text="Auto append \\r\\n",
-                                              font=config.DEFAULT_FONT,
-                                              text_color="white", fg_color=config.BG_COLOR)
+        self.auto_terminate = ctk.CTkCheckBox(
+            self.bottom_frame, text="Auto append \\r\\n",
+            font=config.DEFAULT_FONT,
+            text_color="white", fg_color=config.BG_COLOR
+        )
         self.auto_terminate.select()
         self.auto_terminate.pack(side="left", padx=5)
 
         # Initial port refresh
         self.refresh_ports()
+
+
 
     def center_window(self, width, height):
         screen_width = self.winfo_screenwidth()
@@ -127,16 +226,27 @@ class SerialMonitorGUI(ctk.CTk):
         self.port_combo.set(self.truncate_text(selection))
 
     def append_text(self, text):
-        self.terminal.config(state="normal")
-        self.terminal.insert(tk.END, text + "\n")
-        self.terminal.see(tk.END)
-        self.terminal.config(state="disabled")
+        """Delegate all single‐line appends to the ScrollController."""
+        self.scroll_controller.append(text)
 
     def insert_plain_text(self, text):
-        self.terminal.config(state="normal")
-        self.terminal.insert(tk.END, text)
-        self.terminal.see(tk.END)
-        self.terminal.config(state="disabled")
+        """
+        Reassemble arbitrary serial chunks so that *only* real '\n'
+        (sent by the device) break lines. We split *keeping* the '\n'
+        and feed them verbatim into append().
+        """
+        data = self._partial_line + text
+        segments = data.splitlines(keepends=True)
+        self._partial_line = ""
+
+        for seg in segments:
+            if seg.endswith("\n"):
+                # seg includes the '\n' exactly where the device sent it
+                self.scroll_controller.append(seg)
+            else:
+                # no newline yet—stash for next time
+                self._partial_line += seg
+
 
     def clear_terminal(self):
         self.terminal.config(state="normal")
@@ -197,12 +307,62 @@ class SerialMonitorGUI(ctk.CTk):
         self.baud_combo.configure(state="normal")
 
     def send_message(self):
-        if self.serial_comm and self.serial_comm.serial_port and self.serial_comm.serial_port.is_open:
-            message = self.message_input.get()
-            if self.auto_terminate.get():
-                message += "\r\n"
-            self.serial_comm.send_message(message)
-            self.message_input.delete(0, tk.END)
+        if not (self.serial_comm and self.serial_comm.serial_port and self.serial_comm.serial_port.is_open):
+            return
+
+        # 1) Determine text to send
+        raw = self.message_input.get().strip()
+        if not raw:
+            sel = self.cmd_dropdown.get()
+            data = self.cmd_manager.get(sel)
+            if data:
+                raw = data["cmd"] + data["terminator"]
+        if not raw:
+            return
+
+        # 2) History
+        if raw:
+            self.command_history.append(raw)
+        self.history_index = -1
+
+        # 3) Send
+        self.serial_comm.send_message(raw + ("" if raw.endswith("\n") else "\r\n"))
+        self.message_input.delete(0, tk.END)
+
+        # 4) If repeat requested, start it
+        if self.repeat_var.get():
+            self.start_repeat()
+
+    def on_history_up(self, event):
+        """Show previous command."""
+        if not self.command_history:
+            return "break"
+        # if first time, point to last
+        if self.history_index == -1:
+            self.history_index = len(self.command_history) - 1
+        elif self.history_index > 0:
+            self.history_index -= 1
+
+        cmd = self.command_history[self.history_index]
+        self.message_input.delete(0, tk.END)
+        self.message_input.insert(0, cmd)
+        return "break"      # stop Tk from beeping
+
+    def on_history_down(self, event):
+        """Show next command (or clear if at newest)."""
+        if not self.command_history:
+            return "break"
+        # move forward, or clear at end
+        if 0 <= self.history_index < len(self.command_history) - 1:
+            self.history_index += 1
+            cmd = self.command_history[self.history_index]
+        else:
+            self.history_index = -1
+            cmd = ""
+
+        self.message_input.delete(0, tk.END)
+        self.message_input.insert(0, cmd)
+        return "break"
 
     def handle_save_log(self):
         filename = filedialog.asksaveasfilename(
@@ -216,3 +376,91 @@ class SerialMonitorGUI(ctk.CTk):
 
     def get_button_style(self, color):
         return config.BUTTON_STYLES.get(color, config.BUTTON_STYLES["green"])
+
+    def open_add_command_window(self):
+        win = ctk.CTkToplevel(self)
+        win.title("Add Command")
+        # Desired size
+        win_width, win_height = 300, 180
+
+        # Compute center position relative to main window
+        self.update_idletasks()
+        root_x = self.winfo_x()
+        root_y = self.winfo_y()
+        root_w = self.winfo_width()
+        root_h = self.winfo_height()
+        x = root_x + (root_w - win_width) // 2
+        y = root_y + (root_h - win_height) // 2
+
+        win.geometry(f"{win_width}x{win_height}+{x}+{y}")
+        win.transient(self)
+        win.grab_set()
+
+        # --- Command definition fields ---
+        # Name
+        ctk.CTkLabel(win, text="Name:", font=config.DEFAULT_FONT) \
+            .grid(row=0, column=0, padx=5, pady=5, sticky="e")
+        name_e = ctk.CTkEntry(win, font=config.DEFAULT_FONT)
+        name_e.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+
+        # Command
+        ctk.CTkLabel(win, text="Command:", font=config.DEFAULT_FONT) \
+            .grid(row=1, column=0, padx=5, pady=5, sticky="e")
+        cmd_e = ctk.CTkEntry(win, font=config.DEFAULT_FONT)
+        cmd_e.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+
+        # Terminator checkbox
+        term_var = tk.BooleanVar(value=True)
+        ctk.CTkCheckBox(
+            win, text="Append \\r\\n", variable=term_var,
+            font=config.DEFAULT_FONT
+        ).grid(row=2, column=0, columnspan=2, pady=5)
+
+        # Save button
+        def _save():
+            name = name_e.get().strip()
+            cmd  = cmd_e.get()
+            term = "\r\n" if term_var.get() else ""
+            if name and cmd:
+                self.cmd_manager.add(name, cmd, term)
+                self.cmd_dropdown.configure(values=self.cmd_manager.names())
+                win.destroy()
+
+        ctk.CTkButton(
+            win, text="Save", command=_save, font=config.DEFAULT_FONT
+        ).grid(row=3, column=0, columnspan=2, pady=10)
+
+    def start_repeat(self):
+        # disable the checkbox, enable Stop
+        self.repeat_checkbox.configure(state="disabled")
+        self.stop_repeat_button.configure(state="normal")
+        interval = 1000
+        try:
+            interval = int(self.interval_entry.get())
+        except ValueError:
+            pass
+        # schedule first send
+        self._repeat_id = self.after(interval, self._repeat_send)
+
+    def _repeat_send(self):
+        sel = self.cmd_dropdown.get()
+        data = self.cmd_manager.get(sel)
+        if data and self.serial_comm and self.serial_comm.serial_port.is_open:
+            self.serial_comm.send_message(data["cmd"] + data["terminator"])
+        # schedule next
+        interval = 1000
+        try:
+            interval = int(self.interval_entry.get())
+        except ValueError:
+            pass
+        self._repeat_id = self.after(interval, self._repeat_send)
+
+    def stop_repeat(self):
+        # cancel the after() loop
+        if hasattr(self, "_repeat_id"):
+            self.after_cancel(self._repeat_id)
+            del self._repeat_id
+        # re-enable controls
+        self.repeat_var.set(False)
+        self.repeat_checkbox.configure(state="normal")
+        self.stop_repeat_button.configure(state="disabled")
