@@ -1,3 +1,6 @@
-<commands><command name="Save EEPROM Content"><cmd>DUMP_EEPROM</cmd><terminator>
-</terminator></command><command name="Help"><cmd>HELP</cmd><terminator>
+<commands><command name="Save EEPROM Content"><cmd>DUMP_EEPROM</cmd><terminator>
+
+</terminator></command><command name="Help"><cmd>HELP</cmd><terminator>
+
+</terminator></command><command name="Reboot"><cmd>REBOOT</cmd><terminator>
 </terminator></command></commands>

@@ -23,16 +23,13 @@ class SerialMonitorGUI(ctk.CTk):
         self.port_map = {}
         self.selected_port_full = ""
 
-        # ----- Top Frame: Controls (Port/Refresh under one column, Baud/Connect under another) -----
+        # ----- Top Frame: Port & Baud + Connect/Refresh -----
         self.top_frame = ctk.CTkFrame(self, fg_color=config.BG_COLOR, border_width=0)
         self.top_frame.pack(fill="x", padx=10, pady=5)
-
-        # Columns 0–4 fixed, 5 expands
         for col in range(5):
             self.top_frame.grid_columnconfigure(col, weight=0)
         self.top_frame.grid_columnconfigure(5, weight=1)
 
-        # Row 0: Port & Baud selectors
         ctk.CTkLabel(self.top_frame, text="Port:", fg_color=config.BG_COLOR,
                      text_color="white", font=config.DEFAULT_FONT) \
             .grid(row=0, column=0, padx=(0,5), pady=2, sticky="w")
@@ -53,7 +50,6 @@ class SerialMonitorGUI(ctk.CTk):
         self.baud_combo.set("115200")
         self.baud_combo.grid(row=0, column=4, padx=(0,5), pady=2, sticky="w")
 
-        # Row 1: Buttons under the selectors
         self.refresh_button = ctk.CTkButton(
             self.top_frame, text="Refresh Ports", width=180,
             command=self.refresh_ports,
@@ -72,11 +68,10 @@ class SerialMonitorGUI(ctk.CTk):
         )
         self.connect_button.grid(row=1, column=4, padx=(0,5), pady=2, sticky="w")
 
-        # Expanding spacer
         ctk.CTkLabel(self.top_frame, text="", fg_color=config.BG_COLOR) \
             .grid(row=0, column=5, rowspan=2, sticky="nsew")
 
-        # ----- Middle Frame: Terminal with no-wrap + dual scrollbars -----
+        # ----- Middle Frame: Terminal -----
         self.middle_frame = ctk.CTkFrame(self, fg_color=config.BG_COLOR, border_width=0)
         self.middle_frame.pack(fill="both", expand=True, padx=10, pady=5)
         self.middle_frame.grid_columnconfigure(0, weight=1)
@@ -93,7 +88,6 @@ class SerialMonitorGUI(ctk.CTk):
             wrap="none"
         )
         self.terminal.grid(row=0, column=0, sticky="nsew")
-
         v_scroll = tk.Scrollbar(self.middle_frame, orient="vertical", command=self.terminal.yview)
         v_scroll.grid(row=0, column=1, sticky="ns")
         h_scroll = tk.Scrollbar(self.middle_frame, orient="horizontal", command=self.terminal.xview)
@@ -105,19 +99,48 @@ class SerialMonitorGUI(ctk.CTk):
         self.terminal.insertPlainText = self.scroll_controller.append
         self._partial_line = ""
 
-        # ----- Input Frame: User input, Send button, and new command UI -----
-        self.input_frame = ctk.CTkFrame(self, fg_color=config.BG_COLOR, border_width=0)
-        self.input_frame.pack(fill="x", padx=10, pady=5)
+        # ----- Bottom Section: 3 Rows -----
+        self.bottom_section = ctk.CTkFrame(self, fg_color=config.BG_COLOR, border_width=0)
+        self.bottom_section.pack(fill="x", padx=10, pady=5)
 
-        # Message entry + Send
+        # Row 1: Clear, Save, Auto-append
+        row1 = ctk.CTkFrame(self.bottom_section, fg_color=config.BG_COLOR, border_width=0)
+        row1.pack(fill="x", pady=(0,5))
+        self.clear_button = ctk.CTkButton(
+            row1, text="Clear Terminal", width=120,
+            command=self.clear_terminal,
+            fg_color=config.BUTTON_STYLES["green"][0],
+            hover_color=config.BUTTON_STYLES["green"][1],
+            font=config.DEFAULT_FONT
+        )
+        self.clear_button.pack(side="left", padx=5)
+        self.save_button = ctk.CTkButton(
+            row1, text="Save Log", width=120,
+            command=self.handle_save_log,
+            fg_color=config.BUTTON_STYLES["blue"][0],
+            hover_color=config.BUTTON_STYLES["blue"][1],
+            font=config.DEFAULT_FONT
+        )
+        self.save_button.pack(side="left", padx=5)
+        self.auto_terminate = ctk.CTkCheckBox(
+            row1, text="Auto append \\r\\n",
+            font=config.DEFAULT_FONT,
+            text_color="white", fg_color=config.BG_COLOR
+        )
+        self.auto_terminate.select()
+        self.auto_terminate.pack(side="left", padx=5)
+
+        # Row 2: Message entry + Send
+        row2 = ctk.CTkFrame(self.bottom_section, fg_color=config.BG_COLOR, border_width=0)
+        row2.pack(fill="x", pady=(0,5))
         self.message_input = ctk.CTkEntry(
-            self.input_frame, placeholder_text="Type a message.",
+            row2, placeholder_text="Type a message.",
             font=config.DEFAULT_FONT
         )
         self.message_input.pack(side="left", fill="x", expand=True, padx=5)
         self.message_input.bind("<Return>", lambda e: self.send_message())
         self.send_button = ctk.CTkButton(
-            self.input_frame, text="Send", width=80,
+            row2, text="Send", width=80,
             command=self.send_message,
             fg_color=config.BUTTON_STYLES["green"][0],
             hover_color=config.BUTTON_STYLES["green"][1],
@@ -125,25 +148,40 @@ class SerialMonitorGUI(ctk.CTk):
         )
         self.send_button.pack(side="left", padx=5)
 
-        # ---- COMMAND HISTORY ----
+        # ---- COMMAND HISTORY (fix) ----
         self.command_history = []
         self.history_index = -1
         self.message_input.bind("<Up>", self.on_history_up)
         self.message_input.bind("<Down>", self.on_history_down)
 
-        # --- Command Manager & UI (now that input_frame exists) ---
+        # Row 3: Command dropdown, Send Command, Add, Repeat
+        row3 = ctk.CTkFrame(self.bottom_section, fg_color=config.BG_COLOR, border_width=0)
+        row3.pack(fill="x")
         self.cmd_manager = CommandManager()
+        names = self.cmd_manager.names()
+        if names:
+            vals, sel, st = names, names[0], "normal"
+        else:
+            vals, sel, st = ["No saved commands"], "No saved commands", "disabled"
+
         self.cmd_dropdown = ctk.CTkOptionMenu(
-            self.input_frame,
-            values=self.cmd_manager.names(),
-            width=200,
-            font=config.DEFAULT_FONT
+            row3, values=vals, width=200, font=config.DEFAULT_FONT
         )
-        self.cmd_dropdown.set("")
+        self.cmd_dropdown.set(sel)
         self.cmd_dropdown.pack(side="left", padx=5)
 
+        self.send_cmd_button = ctk.CTkButton(
+            row3, text="Send Command", width=120,
+            command=self.send_command,
+            fg_color=config.BUTTON_STYLES["green"][0],
+            hover_color=config.BUTTON_STYLES["green"][1],
+            font=config.DEFAULT_FONT,
+            state=st
+        )
+        self.send_cmd_button.pack(side="left", padx=5)
+
         self.add_cmd_button = ctk.CTkButton(
-            self.input_frame, text="Add Command", width=100,
+            row3, text="Add Command", width=100,
             command=self.open_add_command_window,
             fg_color=config.BUTTON_STYLES["blue"][0],
             hover_color=config.BUTTON_STYLES["blue"][1],
@@ -151,24 +189,20 @@ class SerialMonitorGUI(ctk.CTk):
         )
         self.add_cmd_button.pack(side="left", padx=5)
 
-        # Repeat controls
         self.repeat_var = tk.BooleanVar(value=False)
         self.repeat_checkbox = ctk.CTkCheckBox(
-            self.input_frame, text="Repeat",
-            variable=self.repeat_var,
-            font=config.DEFAULT_FONT,
-            text_color="white", fg_color=config.BG_COLOR
+            row3, text="Repeat", variable=self.repeat_var,
+            font=config.DEFAULT_FONT, text_color="white", fg_color=config.BG_COLOR
         )
         self.repeat_checkbox.pack(side="left", padx=(15,5))
         self.interval_entry = ctk.CTkEntry(
-            self.input_frame, width=80,
-            placeholder_text="Interval ms",
+            row3, width=80, placeholder_text="Interval ms",
             font=config.DEFAULT_FONT
         )
         self.interval_entry.insert(0, "1000")
         self.interval_entry.pack(side="left", padx=5)
         self.stop_repeat_button = ctk.CTkButton(
-            self.input_frame, text="Stop Repeat", width=100,
+            row3, text="Stop Repeat", width=100,
             command=self.stop_repeat,
             fg_color=config.BUTTON_STYLES["red"][0],
             hover_color=config.BUTTON_STYLES["red"][1],
@@ -177,37 +211,8 @@ class SerialMonitorGUI(ctk.CTk):
         )
         self.stop_repeat_button.pack(side="left", padx=5)
 
-        # ----- Bottom Frame: Clear Terminal, Save Log, Auto Append -----
-        self.bottom_frame = ctk.CTkFrame(self, fg_color=config.BG_COLOR, border_width=0)
-        self.bottom_frame.pack(fill="x", padx=10, pady=5)
-        self.clear_button = ctk.CTkButton(
-            self.bottom_frame, text="Clear Terminal", width=120,
-            command=self.clear_terminal,
-            fg_color=config.BUTTON_STYLES["green"][0],
-            hover_color=config.BUTTON_STYLES["green"][1],
-            font=config.DEFAULT_FONT
-        )
-        self.clear_button.pack(side="left", padx=5)
-        self.save_button = ctk.CTkButton(
-            self.bottom_frame, text="Save Log", width=120,
-            command=self.handle_save_log,
-            fg_color=config.BUTTON_STYLES["blue"][0],
-            hover_color=config.BUTTON_STYLES["blue"][1],
-            font=config.DEFAULT_FONT
-        )
-        self.save_button.pack(side="left", padx=5)
-        self.auto_terminate = ctk.CTkCheckBox(
-            self.bottom_frame, text="Auto append \\r\\n",
-            font=config.DEFAULT_FONT,
-            text_color="white", fg_color=config.BG_COLOR
-        )
-        self.auto_terminate.select()
-        self.auto_terminate.pack(side="left", padx=5)
-
-        # Initial port refresh
+        # Populate ports list
         self.refresh_ports()
-
-
 
     def center_window(self, width, height):
         screen_width = self.winfo_screenwidth()
@@ -380,50 +385,42 @@ class SerialMonitorGUI(ctk.CTk):
     def open_add_command_window(self):
         win = ctk.CTkToplevel(self)
         win.title("Add Command")
-        # Desired size
         win_width, win_height = 300, 180
-
-        # Compute center position relative to main window
         self.update_idletasks()
-        root_x = self.winfo_x()
-        root_y = self.winfo_y()
-        root_w = self.winfo_width()
-        root_h = self.winfo_height()
-        x = root_x + (root_w - win_width) // 2
-        y = root_y + (root_h - win_height) // 2
-
+        x = self.winfo_x() + (self.winfo_width() - win_width) // 2
+        y = self.winfo_y() + (self.winfo_height() - win_height) // 2
         win.geometry(f"{win_width}x{win_height}+{x}+{y}")
         win.transient(self)
         win.grab_set()
 
-        # --- Command definition fields ---
-        # Name
+        # --- Fields ---
         ctk.CTkLabel(win, text="Name:", font=config.DEFAULT_FONT) \
             .grid(row=0, column=0, padx=5, pady=5, sticky="e")
         name_e = ctk.CTkEntry(win, font=config.DEFAULT_FONT)
         name_e.grid(row=0, column=1, padx=5, pady=5, sticky="w")
 
-        # Command
         ctk.CTkLabel(win, text="Command:", font=config.DEFAULT_FONT) \
             .grid(row=1, column=0, padx=5, pady=5, sticky="e")
         cmd_e = ctk.CTkEntry(win, font=config.DEFAULT_FONT)
         cmd_e.grid(row=1, column=1, padx=5, pady=5, sticky="w")
 
-        # Terminator checkbox
         term_var = tk.BooleanVar(value=True)
         ctk.CTkCheckBox(
             win, text="Append \\r\\n", variable=term_var,
             font=config.DEFAULT_FONT
         ).grid(row=2, column=0, columnspan=2, pady=5)
 
-        # Save button
         def _save():
             name = name_e.get().strip()
             cmd  = cmd_e.get()
             term = "\r\n" if term_var.get() else ""
             if name and cmd:
                 self.cmd_manager.add(name, cmd, term)
-                self.cmd_dropdown.configure(values=self.cmd_manager.names())
+                # update dropdown and enable Send Command
+                names = self.cmd_manager.names()
+                self.cmd_dropdown.configure(values=names)
+                self.cmd_dropdown.set(names[0])
+                self.send_cmd_button.configure(state="normal")
                 win.destroy()
 
         ctk.CTkButton(
@@ -464,3 +461,20 @@ class SerialMonitorGUI(ctk.CTk):
         self.repeat_var.set(False)
         self.repeat_checkbox.configure(state="normal")
         self.stop_repeat_button.configure(state="disabled")
+
+    def send_command(self):
+        """Send the selected saved command over serial (if any)."""
+        sel = self.cmd_dropdown.get()
+        # nothing to do if no commands
+        if sel == "No saved commands":
+            return
+
+        data = self.cmd_manager.get(sel)
+        if not data:
+            return
+
+        cmd = data["cmd"] + data["terminator"]
+        if self.serial_comm \
+        and self.serial_comm.serial_port \
+        and self.serial_comm.serial_port.is_open:
+            self.serial_comm.send_message(cmd)
