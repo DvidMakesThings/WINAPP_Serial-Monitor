@@ -252,7 +252,6 @@ class SerialMonitorGUI(ctk.CTk):
                 # no newline yet—stash for next time
                 self._partial_line += seg
 
-
     def clear_terminal(self):
         self.terminal.config(state="normal")
         self.terminal.delete("1.0", tk.END)
