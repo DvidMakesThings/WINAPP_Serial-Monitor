@@ -1,6 +1,8 @@
-import serial
+
 import threading
 import time
+
+import serial
 
 class SerialComm:
     def __init__(self, port_combo, baud_combo, connect_button, terminal, port_map, get_button_style):

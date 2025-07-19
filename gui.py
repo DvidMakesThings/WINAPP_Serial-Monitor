@@ -42,7 +42,7 @@ class SerialMonitorGUI(ctk.CTk):
         ctk.CTkLabel(self.top_frame, text="Baud:", fg_color=config.BG_COLOR,
                      text_color="white", font=config.DEFAULT_FONT) \
             .grid(row=0, column=3, padx=(0,5), pady=2, sticky="w")
-        standard_baud_rates = [110,300,600,1200,2400,4800,9600,14400,19200,38400,57600,115200,128000,256000]
+        standard_baud_rates = [110,300,600,1200,2400,4800,9600,14400,19200,38400,57600,115200,128000,256000,1000000]
         self.baud_combo = ctk.CTkOptionMenu(
             self.top_frame, values=[str(b) for b in standard_baud_rates],
             width=100, font=config.DEFAULT_FONT
