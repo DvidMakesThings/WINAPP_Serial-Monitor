@@ -3,3 +3,4 @@ pyserial
 serial
 pandas 
 openpyxl
+matplotlib 
