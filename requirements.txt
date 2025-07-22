@@ -4,3 +4,4 @@ serial
 pandas 
 openpyxl
 matplotlib 
+customtkinter
