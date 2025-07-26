@@ -853,3 +853,126 @@ class SerialMonitorGUI(ctk.CTk):
 
     def get_button_style(self, color):
         return config.BUTTON_STYLES.get(color, config.BUTTON_STYLES["green"])
+
+    def open_command_manager(self):
+        """Open the enhanced command manager window"""
+        CommandManagerWindow(self, self.cmd_manager, self.update_command_dropdown)
+    
+    def update_command_dropdown(self):
+        """Update the command dropdown after changes"""
+        names = self.cmd_manager.names()
+        if names:
+            self.cmd_dropdown.configure(values=names)
+            if self.cmd_dropdown.get() not in names:
+                self.cmd_dropdown.set(names[0])
+            self.send_cmd_button.configure(state="normal")
+        else:
+            self.cmd_dropdown.configure(values=["No saved commands"])
+            self.cmd_dropdown.set("No saved commands")
+            self.send_cmd_button.configure(state="disabled")
+
+    def start_repeat(self):
+        # disable the checkbox, enable Stop
+        self.repeat_checkbox.configure(state="disabled")
+        self.stop_repeat_button.configure(state="normal")
+        interval = 1000
+        try:
+            interval = int(self.interval_entry.get())
+        except ValueError:
+            pass
+        # schedule first send
+        self._repeat_id = self.after(interval, self._repeat_send)
+        self._after_ids.add(self._repeat_id)
+
+    def _repeat_send(self):
+        if self._repeat_id in self._after_ids:
+            self._after_ids.remove(self._repeat_id)
+            
+        sel = self.cmd_dropdown.get()
+        data = self.cmd_manager.get(sel)
+        if data and self.serial_comm and self.serial_comm.serial_port.is_open:
+            self.serial_comm.send_message(data["cmd"] + data["terminator"])
+        # schedule next
+        interval = 1000
+        try:
+            interval = int(self.interval_entry.get())
+        except ValueError:
+            pass
+        self._repeat_id = self.after(interval, self._repeat_send)
+        self._after_ids.add(self._repeat_id)
+
+    def stop_repeat(self):
+        # cancel the after() loop
+        if hasattr(self, "_repeat_id") and self._repeat_id:
+            try:
+                self.after_cancel(self._repeat_id)
+                if self._repeat_id in self._after_ids:
+                    self._after_ids.remove(self._repeat_id)
+            except:
+                pass
+            self._repeat_id = None
+        # re-enable controls
+        self.repeat_var.set(False)
+        self.repeat_checkbox.configure(state="normal")
+        self.stop_repeat_button.configure(state="disabled")
+
+    def send_command(self):
+        """Send the selected saved command over serial (if any)."""
+        sel = self.cmd_dropdown.get()
+        # nothing to do if no commands
+        if sel == "No saved commands":
+            return
+
+        data = self.cmd_manager.get(sel)
+        if not data:
+            return
+
+        cmd = data["cmd"] + data["terminator"]
+        if self.serial_comm \
+        and self.serial_comm.serial_port \
+        and self.serial_comm.serial_port.is_open:
+            self.serial_comm.send_message(cmd)
+    
+    def test_data_tags(self):
+        """Test the data tag processing by simulating tag data"""
+        import time
+        from datetime import datetime
+        
+        # Simulate various tag types
+        test_data = [
+            "[PLOT] voltage: 3.3",
+            "[PLOT] voltage: 3.4", 
+            "[PLOT] voltage: 3.2",
+            "[PLOT] voltage: 3.5",
+            "[PLOT] voltage: 3.1",
+            "[PLOT] voltage2: 3.1",
+            "[PLOT] voltage2: 5.2",
+            "[PLOT] voltage2: 4.9", 
+            "[PLOT] voltage2: 5.0",
+            "[PLOT] voltage2: 5.1",
+            "[PLOT] voltage3: 5.6",
+            "[PLOT] voltage3: 5.8",
+            "[PLOT] voltage3: 5.4",
+            "[PLOT] voltage3: 5.7",
+            "[PLOT] temperature_sensor: 26.1",
+            "[PLOT] temperature_sensor: 25.8",
+            "[PLOT] temperature_sensor: 26.3",
+            "[PLOT] current_sensor: 0.130",
+            "[PLOT] current_sensor: 0.128",
+            "[PLOT] current_sensor: 0.135"
+        ]
+        
+        self.append_text("🧪 Testing data tags with multiple series...\n")
+        
+        # Process each test data entry
+        for i, data_line in enumerate(test_data):
+            timestamp = datetime.now()
+            self.append_text(f"Test {i+1}: {data_line}\n")
+            
+            # Process through data processor
+            self.data_processor.process_data(data_line, timestamp)
+            
+            # Small delay to see the progression
+            time.sleep(0.3)
+        
+        self.append_text("🧪 Test completed! Check the Data Plot tab.\n")

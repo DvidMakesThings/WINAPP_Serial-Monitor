@@ -3,7 +3,7 @@ import sys
 import shutil
 
 # Window dimensions
-WINDOW_WIDTH = 780
+WINDOW_WIDTH = 500
 WINDOW_HEIGHT = 750
 
 # Fonts

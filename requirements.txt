@@ -2,5 +2,4 @@ pyserial
 serial
 pandas 
 openpyxl
-matplotlib 
 customtkinter
