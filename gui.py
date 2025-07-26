@@ -349,6 +349,16 @@ class SerialMonitorGUI(ctk.CTk):
         )
         self.pause_button.pack(side="left", padx=5)
         
+        # Test tags button
+        self.test_tags_button = ctk.CTkButton(
+            row1, text="Test Tags", width=100,
+            command=self.test_data_tags,
+            fg_color=config.BUTTON_STYLES["blue"][0],
+            hover_color=config.BUTTON_STYLES["blue"][1],
+            font=config.DEFAULT_FONT
+        )
+        self.test_tags_button.pack(side="left", padx=5)
+        
         self.auto_terminate = ctk.CTkCheckBox(
             row1, text="Auto append \\r\\n",
             font=config.DEFAULT_FONT,
@@ -543,8 +553,11 @@ class SerialMonitorGUI(ctk.CTk):
     def on_new_plot_data(self, timestamp, value, name="default"):
         """Callback for when new numeric data is available for plotting"""
         try:
+            print(f"DEBUG: on_new_plot_data called - name: '{name}', value: {value}")
             if hasattr(self, 'plot_widget') and not getattr(self.plot_widget, 'destroyed', False):
                 self.plot_widget.add_data_point(timestamp, value, name)
+            else:
+                print("DEBUG: plot_widget not available or destroyed")
         except Exception as e:
             print(f"Error in on_new_plot_data: {e}")
             traceback.print_exc()
@@ -919,3 +932,47 @@ class SerialMonitorGUI(ctk.CTk):
         and self.serial_comm.serial_port \
         and self.serial_comm.serial_port.is_open:
             self.serial_comm.send_message(cmd)
+    
+    def test_data_tags(self):
+        """Test the data tag processing by simulating tag data"""
+        import time
+        from datetime import datetime
+        
+        # Simulate various tag types
+        test_data = [
+            "[PLOT] voltage: 3.1",
+            "[PLOT] voltage: 3.2", 
+            "[PLOT] voltage: 3.3",
+            "[PLOT] voltage: 3.4",
+            "[PLOT] voltage: 3.5",
+            "[PLOT] voltage2: 3.4",
+            "[PLOT] voltage2: 3.3",
+            "[PLOT] voltage2: 3.2", 
+            "[PLOT] voltage2: 3.1",
+            "[PLOT] voltage2: 3.15",
+            "[PLOT] voltage3: 24.6",
+            "[PLOT] voltage3: 25.8",
+            "[PLOT] voltage3: 25.4",
+            "[PLOT] voltage3: 25.7",
+            "[PLOT] temperature_sensor: 26.1",
+            "[PLOT] temperature_sensor: 25.8",
+            "[PLOT] temperature_sensor: 26.3",
+            "[PLOT] current_sensor: 0.130",
+            "[PLOT] current_sensor: 0.128",
+            "[PLOT] current_sensor: 0.135"
+        ]
+        
+        self.append_text("🧪 Testing data tags with multiple series...\n")
+        
+        # Process each test data entry
+        for i, data_line in enumerate(test_data):
+            timestamp = datetime.now()
+            self.append_text(f"Test {i+1}: {data_line}\n")
+            
+            # Process through data processor
+            self.data_processor.process_data(data_line, timestamp)
+            
+            # Small delay to see the progression
+            time.sleep(0.3)
+        
+        self.append_text("🧪 Test completed! Check the Data Plot tab.\n")
