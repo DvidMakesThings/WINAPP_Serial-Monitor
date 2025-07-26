@@ -26,7 +26,35 @@ BUTTON_STYLES = {
 def get_shared_data_path():
     """
     Returns the shared-writable folder:
-      C:\ProgramData\SerialMonitor
+      C:\\ProgramData\\SerialMonitor
+    Creates it if needed.
+    """
+    base = os.getenv("PROGRAMDATA") or os.getenv("ALLUSERSPROFILE")
+    folder = os.path.join(base, "SerialMonitor")
+    os.makedirs(folder, exist_ok=True)
+    return folder
+
+def get_commands_xml_path():
+    """
+    Returns the full path to commands.xml in ProgramData, 
+    creating an empty file if it doesn't exist yet.
+    """
+    data_dir = get_shared_data_path()
+    xml_path = os.path.join(data_dir, "commands.xml")
+    if not os.path.exists(xml_path):
+        # touch an empty file
+        open(xml_path, "w").close()
+    return xml_path
+
+# Used by CommandManager and GUI everywhere
+COMMANDS_XML = get_commands_xml_path()
+
+
+# ─── COMMANDS.XML LOCATION ──────────────────────────────────────────────────
+def get_shared_data_path():
+    """
+    Returns the shared-writable folder:
+      C:\\ProgramData\\SerialMonitor
     Creates it if needed.
     """
     base = os.getenv("PROGRAMDATA") or os.getenv("ALLUSERSPROFILE")

@@ -3,28 +3,230 @@ import tkinter as tk
 from tkinter import filedialog
 import customtkinter as ctk
 from serial_comm import SerialComm
-from file_handler import save_log
+from enhanced_file_handler import EnhancedFileHandler
 import platform
 import config  # Import our configuration settings
 from scroll_pause import ScrollController
-from command_manager import CommandManager
+from enhanced_command_manager import EnhancedCommandManager, CommandManagerWindow
+from data_processor import DataProcessor
+from plot_widget import PlotWidget
 import tkinter as tk
+from datetime import datetime
+import traceback
+import sys
+import threading
+import queue
+import time
+
+
+class ExportDialog:
+    def __init__(self, parent, data_processor, file_handler):
+        self.data_processor = data_processor
+        self.file_handler = file_handler
+        
+        self.window = ctk.CTkToplevel(parent)
+        self.window.title("Export Data")
+        self.window.geometry("400x550")
+        
+        # Center window
+        parent.update_idletasks()
+        x = parent.winfo_x() + (parent.winfo_width() - 400) // 2
+        y = parent.winfo_y() + (parent.winfo_height() - 550) // 2
+        self.window.geometry(f"400x550+{x}+{y}")
+        
+        self.window.transient(parent)
+        self.window.grab_set()
+        
+        self.setup_ui()
+    
+    def setup_ui(self):
+        """Setup export dialog UI"""
+        main_frame = ctk.CTkFrame(self.window)
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # Data type selection
+        ctk.CTkLabel(main_frame, text="Data Type:", font=("Arial", 12, "bold")).pack(anchor="w", pady=(0, 5))
+        self.data_type_var = ctk.StringVar(value="filtered")
+        data_types = [
+            ("All Filtered Data", "filtered"), 
+            ("Raw Data", "raw"), 
+            ("All Structured Data", "structured"),
+            ("DATA entries only", "data"), 
+            ("PLOT entries only", "plot"), 
+            ("MEAS entries only", "meas")
+        ]
+        
+        for text, value in data_types:
+            ctk.CTkRadioButton(main_frame, text=text, variable=self.data_type_var, 
+                              value=value).pack(anchor="w", padx=10, pady=2)
+        
+        # Format selection
+        ctk.CTkLabel(main_frame, text="Export Format:", font=("Arial", 12, "bold")).pack(anchor="w", pady=(20, 5))
+        self.format_var = ctk.StringVar(value="csv")
+        formats = [("CSV", "csv"), ("JSON", "json"), ("Excel", "xlsx"), ("Text", "txt")]
+        
+        for text, value in formats:
+            ctk.CTkRadioButton(main_frame, text=text, variable=self.format_var, 
+                              value=value).pack(anchor="w", padx=10, pady=2)
+        
+        # Options
+        ctk.CTkLabel(main_frame, text="Options:", font=("Arial", 12, "bold")).pack(anchor="w", pady=(20, 5))
+        self.include_metadata_var = tk.BooleanVar(value=True)
+        ctk.CTkCheckBox(main_frame, text="Include metadata", 
+                       variable=self.include_metadata_var).pack(anchor="w", padx=10, pady=2)
+        
+        # Buttons
+        button_frame = ctk.CTkFrame(main_frame)
+        button_frame.pack(fill="x", pady=(20, 0))
+        
+        ctk.CTkButton(button_frame, text="Cancel", 
+                     command=self.window.destroy).pack(side="right", padx=(5, 0))
+        ctk.CTkButton(button_frame, text="Export", 
+                     command=self.export_data).pack(side="right")
+    
+    def export_data(self):
+        """Perform the data export"""
+        data_type = self.data_type_var.get()
+        format_type = self.format_var.get()
+        include_metadata = self.include_metadata_var.get()
+        
+        if self.file_handler.export_data_advanced(
+            self.data_processor, None, format_type, data_type, include_metadata
+        ):
+            self.window.destroy()
 
 
 class SerialMonitorGUI(ctk.CTk):
     def __init__(self):
         super().__init__()
+        
+        # Set up global exception handler
+        self.setup_exception_handler()
+        
+        # Track all scheduled callbacks for cleanup
+        self._after_ids = set()
+        self._repeat_id = None
+        
         self.title("Serial Monitor")
-        self.geometry(f"{config.WINDOW_WIDTH}x{config.WINDOW_HEIGHT}")
-        self.center_window(config.WINDOW_WIDTH, config.WINDOW_HEIGHT)
+        # Increase window size for new features
+        window_width = config.WINDOW_WIDTH + 400
+        window_height = config.WINDOW_HEIGHT + 200
+        self.geometry(f"{window_width}x{window_height}")
+        self.center_window(window_width, window_height)
         self.configure(bg=config.BG_COLOR)
 
         self.serial_comm = None
         self.port_map = {}
         self.selected_port_full = ""
+        
+        # Initialize enhanced components
+        self.data_processor = DataProcessor()
+        self.file_handler = EnhancedFileHandler()
+        
+        # Setup data processing callbacks
+        self.data_processor.add_data_callback(self.on_new_data)
+        self.data_processor.add_plot_callback(self.on_new_plot_data)
+        self.data_processor.add_structured_callback(self.on_structured_data)
+        
+        self.setup_ui()
+        
+        # Populate ports list
+        self.refresh_ports()
+        
+        # Bind cleanup to window close
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
+    
+    def setup_exception_handler(self):
+        """Set up global exception handler to catch unhandled exceptions"""
+        def handle_exception(exc_type, exc_value, exc_traceback):
+            if issubclass(exc_type, KeyboardInterrupt):
+                sys.__excepthook__(exc_type, exc_value, exc_traceback)
+                return
+            
+            error_msg = f"Unhandled exception: {exc_type.__name__}: {exc_value}\n"
+            error_msg += "".join(traceback.format_tb(exc_traceback))
+            
+            print(f"ERROR: {error_msg}")
+            
+            # Try to log to terminal if it exists
+            try:
+                if hasattr(self, 'terminal'):
+                    self.safe_append_text(f"🚨 ERROR: {exc_type.__name__}: {exc_value}\n")
+            except:
+                pass
+        
+        sys.excepthook = handle_exception
+    
+    def safe_append_text(self, text):
+        """Safely append text to terminal with error handling"""
+        try:
+            if hasattr(self, 'scroll_controller') and self.scroll_controller:
+                self.scroll_controller.append(text)
+            else:
+                # Fallback direct append
+                self.terminal.config(state="normal")
+                self.terminal.insert(tk.END, text)
+                self.terminal.see(tk.END)
+                self.terminal.config(state="disabled")
+        except Exception as e:
+            print(f"Error appending to terminal: {e}")
+    
+    def on_closing(self):
+        """Clean up resources before closing"""
+        print("Cleaning up application...")
+        
+        # Stop repeat commands first
+        self.stop_repeat()
+        
+        # Cancel all scheduled after() callbacks
+        for after_id in list(self._after_ids):
+            try:
+                self.after_cancel(after_id)
+            except:
+                pass
+        self._after_ids.clear()
+        
+        # Clean up plot widget first
+        if hasattr(self, 'plot_widget'):
+            try:
+                self.plot_widget.destroy()
+            except:
+                pass
+        
+        # Disconnect serial
+        if hasattr(self, 'serial_comm') and self.serial_comm:
+            try:
+                self.serial_comm.disconnect()
+            except:
+                pass
+        
+        # Destroy window
+        self.destroy()
+    
+    def setup_ui(self):
+        """Setup the main UI components"""
+        # Create main container with notebook for tabs
+        self.notebook = ctk.CTkTabview(self)
+        self.notebook.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Main terminal tab
+        self.terminal_tab = self.notebook.add("Terminal")
+        self.setup_terminal_tab()
+        
+        # Data visualization tab
+        self.plot_tab = self.notebook.add("Data Plot")
+        self.setup_plot_tab()
+        
+        # Data analysis tab
+        self.analysis_tab = self.notebook.add("Analysis")
+        self.setup_analysis_tab()
+    
+    def setup_terminal_tab(self):
+        """Setup the main terminal interface"""
+        terminal_frame = self.terminal_tab
 
         # ----- Top Frame: Port & Baud + Connect/Refresh -----
-        self.top_frame = ctk.CTkFrame(self, fg_color=config.BG_COLOR, border_width=0)
+        self.top_frame = ctk.CTkFrame(terminal_frame, fg_color=config.BG_COLOR, border_width=0)
         self.top_frame.pack(fill="x", padx=10, pady=5)
         for col in range(5):
             self.top_frame.grid_columnconfigure(col, weight=0)
@@ -72,11 +274,11 @@ class SerialMonitorGUI(ctk.CTk):
             .grid(row=0, column=5, rowspan=2, sticky="nsew")
 
         # ----- Middle Frame: Terminal -----
-        self.middle_frame = ctk.CTkFrame(self, fg_color=config.BG_COLOR, border_width=0)
+        self.middle_frame = ctk.CTkFrame(terminal_frame, fg_color=config.BG_COLOR, border_width=0)
         self.middle_frame.pack(fill="both", expand=True, padx=10, pady=5)
         self.middle_frame.grid_columnconfigure(0, weight=1)
         self.middle_frame.grid_rowconfigure(0, weight=1)
-
+        
         self.terminal = tk.Text(
             self.middle_frame,
             bg=config.TERMINAL_BG,
@@ -99,11 +301,16 @@ class SerialMonitorGUI(ctk.CTk):
         self.terminal.insertPlainText = self.scroll_controller.append
         self._partial_line = ""
 
+        # Bind pause/resume scroll functionality
+        self.terminal.bind("<Button-1>", lambda e: self.scroll_controller.pause())
+        self.terminal.bind("<KeyPress>", lambda e: self.scroll_controller.pause())
+        self.terminal.bind("<Button-3>", lambda e: self.scroll_controller.resume())
+
         # ----- Bottom Section: 3 Rows -----
-        self.bottom_section = ctk.CTkFrame(self, fg_color=config.BG_COLOR, border_width=0)
+        self.bottom_section = ctk.CTkFrame(terminal_frame, fg_color=config.BG_COLOR, border_width=0)
         self.bottom_section.pack(fill="x", padx=10, pady=5)
 
-        # Row 1: Clear, Save, Auto-append
+        # Row 1: Clear, Save, Export, Pause/Resume, Auto-append
         row1 = ctk.CTkFrame(self.bottom_section, fg_color=config.BG_COLOR, border_width=0)
         row1.pack(fill="x", pady=(0,5))
         self.clear_button = ctk.CTkButton(
@@ -115,13 +322,43 @@ class SerialMonitorGUI(ctk.CTk):
         )
         self.clear_button.pack(side="left", padx=5)
         self.save_button = ctk.CTkButton(
-            row1, text="Save Log", width=120,
+            row1, text="Save Log", width=100,
             command=self.handle_save_log,
             fg_color=config.BUTTON_STYLES["blue"][0],
             hover_color=config.BUTTON_STYLES["blue"][1],
             font=config.DEFAULT_FONT
         )
         self.save_button.pack(side="left", padx=5)
+        
+        self.export_button = ctk.CTkButton(
+            row1, text="Export Data", width=100,
+            command=self.handle_export_data,
+            fg_color=config.BUTTON_STYLES["blue"][0],
+            hover_color=config.BUTTON_STYLES["blue"][1],
+            font=config.DEFAULT_FONT
+        )
+        self.export_button.pack(side="left", padx=5)
+        
+        # Pause/Resume scroll button
+        self.pause_button = ctk.CTkButton(
+            row1, text="Pause Scroll", width=120,
+            command=self.toggle_scroll_pause,
+            fg_color=config.BUTTON_STYLES["blue"][0],
+            hover_color=config.BUTTON_STYLES["blue"][1],
+            font=config.DEFAULT_FONT
+        )
+        self.pause_button.pack(side="left", padx=5)
+        
+        # Test tags button
+        self.test_tags_button = ctk.CTkButton(
+            row1, text="Test Tags", width=100,
+            command=self.test_data_tags,
+            fg_color=config.BUTTON_STYLES["blue"][0],
+            hover_color=config.BUTTON_STYLES["blue"][1],
+            font=config.DEFAULT_FONT
+        )
+        self.test_tags_button.pack(side="left", padx=5)
+        
         self.auto_terminate = ctk.CTkCheckBox(
             row1, text="Auto append \\r\\n",
             font=config.DEFAULT_FONT,
@@ -148,16 +385,19 @@ class SerialMonitorGUI(ctk.CTk):
         )
         self.send_button.pack(side="left", padx=5)
 
-        # ---- COMMAND HISTORY (fix) ----
+        # ---- COMMAND HISTORY ----
         self.command_history = []
         self.history_index = -1
         self.message_input.bind("<Up>", self.on_history_up)
         self.message_input.bind("<Down>", self.on_history_down)
 
-        # Row 3: Command dropdown, Send Command, Add, Repeat
+        # Row 3: Command dropdown, Send Command, Add, Manage, Repeat
         row3 = ctk.CTkFrame(self.bottom_section, fg_color=config.BG_COLOR, border_width=0)
         row3.pack(fill="x")
-        self.cmd_manager = CommandManager()
+        
+        # Enhanced command manager
+        self.cmd_manager = EnhancedCommandManager()
+        
         names = self.cmd_manager.names()
         if names:
             vals, sel, st = names, names[0], "normal"
@@ -182,12 +422,21 @@ class SerialMonitorGUI(ctk.CTk):
 
         self.add_cmd_button = ctk.CTkButton(
             row3, text="Add Command", width=100,
-            command=self.open_add_command_window,
+            command=self.open_command_manager,
             fg_color=config.BUTTON_STYLES["blue"][0],
             hover_color=config.BUTTON_STYLES["blue"][1],
             font=config.DEFAULT_FONT
         )
         self.add_cmd_button.pack(side="left", padx=5)
+        
+        self.manage_cmd_button = ctk.CTkButton(
+            row3, text="Manage", width=80,
+            command=self.open_command_manager,
+            fg_color=config.BUTTON_STYLES["blue"][0],
+            hover_color=config.BUTTON_STYLES["blue"][1],
+            font=config.DEFAULT_FONT
+        )
+        self.manage_cmd_button.pack(side="left", padx=5)
 
         self.repeat_var = tk.BooleanVar(value=False)
         self.repeat_checkbox = ctk.CTkCheckBox(
@@ -211,8 +460,58 @@ class SerialMonitorGUI(ctk.CTk):
         )
         self.stop_repeat_button.pack(side="left", padx=5)
 
-        # Populate ports list
-        self.refresh_ports()
+    def setup_plot_tab(self):
+        """Setup the data plotting tab"""
+        plot_frame = self.plot_tab
+        
+        # Create plot widget
+        self.plot_widget = PlotWidget(plot_frame)
+        self.plot_widget.pack(fill="both", expand=True)
+    
+    def setup_analysis_tab(self):
+        """Setup the data analysis tab"""
+        analysis_frame = self.analysis_tab
+        
+        # Statistics frame
+        stats_frame = ctk.CTkFrame(analysis_frame)
+        stats_frame.pack(fill="x", padx=10, pady=10)
+        
+        ctk.CTkLabel(stats_frame, text="Data Statistics", 
+                    font=("Arial", 16, "bold")).pack(pady=10)
+        
+        self.stats_text = ctk.CTkTextbox(stats_frame, height=150)
+        self.stats_text.pack(fill="x", padx=10, pady=10)
+        
+        # Control buttons
+        button_frame = ctk.CTkFrame(analysis_frame)
+        button_frame.pack(fill="x", padx=10, pady=5)
+        
+        ctk.CTkButton(
+            button_frame, text="Refresh Stats",
+            command=self.update_statistics,
+            fg_color=config.BUTTON_STYLES["green"][0],
+            hover_color=config.BUTTON_STYLES["green"][1]
+        ).pack(side="left", padx=5)
+        
+        ctk.CTkButton(
+            button_frame, text="Clear Data Buffers",
+            command=self.clear_data_buffers,
+            fg_color=config.BUTTON_STYLES["red"][0],
+            hover_color=config.BUTTON_STYLES["red"][1]
+        ).pack(side="left", padx=5)
+        
+        # Data preview
+        preview_frame = ctk.CTkFrame(analysis_frame)
+        preview_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        ctk.CTkLabel(preview_frame, text="Recent Data Preview", 
+                    font=("Arial", 14, "bold")).pack(pady=5)
+        
+        self.preview_text = ctk.CTkTextbox(preview_frame, height=200)
+        self.preview_text.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Auto-update statistics
+        self.update_statistics()
 
     def center_window(self, width, height):
         screen_width = self.winfo_screenwidth()
@@ -230,9 +529,178 @@ class SerialMonitorGUI(ctk.CTk):
         self.selected_port_full = selection
         self.port_combo.set(self.truncate_text(selection))
 
+    def on_new_data(self, data_entry):
+        """Callback for when new data is processed"""
+        try:
+            # Update preview in analysis tab
+            if hasattr(self, 'update_data_preview'):
+                after_id = self.after_idle(self.update_data_preview)
+                self._after_ids.add(after_id)
+        except Exception as e:
+            print(f"Error in on_new_data: {e}")
+            traceback.print_exc()
+    
+    def process_serial_data(self, data, timestamp):
+        """Process incoming serial data through the data processor"""
+        try:
+            if hasattr(self, 'data_processor'):
+                # Process the data for filtering, analysis, and plotting
+                self.data_processor.process_data(data, timestamp)
+        except Exception as e:
+            print(f"Data processing error: {e}")
+            traceback.print_exc()
+    
+    def on_new_plot_data(self, timestamp, value, name="default"):
+        """Callback for when new numeric data is available for plotting"""
+        try:
+            print(f"DEBUG: on_new_plot_data called - name: '{name}', value: {value}")
+            if hasattr(self, 'plot_widget') and not getattr(self.plot_widget, 'destroyed', False):
+                self.plot_widget.add_data_point(timestamp, value, name)
+            else:
+                print("DEBUG: plot_widget not available or destroyed")
+        except Exception as e:
+            print(f"Error in on_new_plot_data: {e}")
+            traceback.print_exc()
+    
+    def on_structured_data(self, data_type, name, value, timestamp):
+        """Callback for structured data updates"""
+        try:
+            # Update the analysis tab with structured data info
+            if hasattr(self, 'update_structured_preview'):
+                after_id = self.after_idle(self.update_structured_preview)
+                self._after_ids.add(after_id)
+        except Exception as e:
+            print(f"Error in on_structured_data: {e}")
+            traceback.print_exc()
+    
+    def update_statistics(self):
+        """Update the statistics display"""
+        try:
+            if not hasattr(self, 'stats_text'):
+                return
+                
+            stats = self.data_processor.get_statistics()
+            
+            stats_text = "Data Processing Statistics:\n"
+            stats_text += "=" * 30 + "\n\n"
+            
+            # Add available measurement names
+            available_names = self.data_processor.get_available_names()
+            if available_names:
+                stats_text += f"Available Measurements:\n"
+                for name in available_names:
+                    data_count = len(self.data_processor.get_data_by_name(name, 'DATA'))
+                    plot_count = len(self.data_processor.get_data_by_name(name, 'PLOT'))
+                    meas_count = len(self.data_processor.get_data_by_name(name, 'MEAS'))
+                    stats_text += f"  {name}: DATA={data_count}, PLOT={plot_count}, MEAS={meas_count}\n"
+                stats_text += "\n"
+            
+            for key, value in stats.items():
+                if isinstance(value, float):
+                    stats_text += f"{key.replace('_', ' ').title()}: {value:.2f}\n"
+                else:
+                    stats_text += f"{key.replace('_', ' ').title()}: {value}\n"
+            
+            stats_text += f"\nLast Updated: {datetime.now().strftime('%H:%M:%S')}"
+            
+            if hasattr(self, 'stats_text') and self.stats_text:
+                self.stats_text.delete("1.0", tk.END)
+                self.stats_text.insert("1.0", stats_text)
+        except Exception as e:
+            print(f"Error updating statistics: {e}")
+            traceback.print_exc()
+    
+    def update_data_preview(self):
+        """Update the data preview display"""
+        if not hasattr(self, 'preview_text'):
+            return
+            
+        recent_data = self.data_processor.get_recent_structured_data(count=20)
+        
+        preview_text = "Recent Structured Data (Last 20 entries):\n"
+        preview_text += "=" * 40 + "\n\n"
+        
+        if recent_data:
+            for entry in recent_data[-10:]:  # Show last 10
+                timestamp = entry['timestamp'].strftime('%H:%M:%S.%f')[:-3]
+                preview_text += f"[{timestamp}] [{entry['type']}] {entry['name']}: {entry['value']}\n"
+        else:
+            preview_text += "No structured data received yet.\n"
+            preview_text += "\nExpected format:\n"
+            preview_text += "[DATA] name: value\n"
+            preview_text += "[PLOT] name: value\n"
+            preview_text += "[MEAS] name: value\n"
+        
+        try:
+            self.preview_text.delete("1.0", tk.END)
+            self.preview_text.insert("1.0", preview_text)
+        except:
+            pass  # Widget might be destroyed
+    
+    def update_structured_preview(self):
+        """Update the structured data preview display"""
+        if not hasattr(self, 'preview_text'):
+            return
+            
+        recent_data = self.data_processor.get_recent_structured_data(count=20)
+        
+        preview_text = "Recent Structured Data (Last 20 entries):\n"
+        preview_text += "=" * 40 + "\n\n"
+        
+        # Show available measurement names
+        available_names = self.data_processor.get_available_names()
+        if available_names:
+            preview_text += f"Available measurements: {', '.join(available_names)}\n\n"
+        
+        if recent_data:
+            for entry in recent_data[-10:]:  # Show last 10
+                timestamp = entry['timestamp'].strftime('%H:%M:%S.%f')[:-3]
+                preview_text += f"[{timestamp}] [{entry['type']}] {entry['name']}: {entry['value']}\n"
+        else:
+            preview_text += "No structured data received yet.\n"
+            preview_text += "\nExpected format:\n"
+            preview_text += "[DATA] temperature: 25.6\n"
+            preview_text += "[PLOT] voltage: 3.3\n"
+            preview_text += "[MEAS] current: 0.125\n"
+        
+        try:
+            self.preview_text.delete("1.0", tk.END)
+            self.preview_text.insert("1.0", preview_text)
+        except:
+            pass  # Widget might be destroyed
+    
+    def clear_terminal(self):
+        """Clear the terminal display"""
+        try:
+            self.terminal.config(state="normal")
+            self.terminal.delete("1.0", tk.END)
+            self.terminal.config(state="disabled")
+        except Exception as e:
+            print(f"Error clearing terminal: {e}")
+    
+    def clear_data_buffers(self):
+        """Clear all data processing buffers"""
+        self.data_processor.clear_buffers()
+        if hasattr(self, 'plot_widget') and not getattr(self.plot_widget, 'destroyed', False):
+            self.plot_widget.clear_plot()
+        self.update_statistics()
+        self.update_data_preview()
+        self.append_text("🗑️ Data buffers cleared\n")
+    
     def append_text(self, text):
-        """Delegate all single‐line appends to the ScrollController."""
-        self.scroll_controller.append(text)
+        """Append text to terminal"""
+        try:
+            if hasattr(self, 'scroll_controller') and self.scroll_controller:
+                self.scroll_controller.append(text)
+            else:
+                # Fallback direct append
+                self.terminal.config(state="normal")
+                self.terminal.insert(tk.END, text)
+                self.terminal.see(tk.END)
+                self.terminal.config(state="disabled")
+        except Exception as e:
+            print(f"Error in append_text: {e}")
+            traceback.print_exc()
 
     def insert_plain_text(self, text):
         """
@@ -252,10 +720,18 @@ class SerialMonitorGUI(ctk.CTk):
                 # no newline yet—stash for next time
                 self._partial_line += seg
 
-    def clear_terminal(self):
-        self.terminal.config(state="normal")
-        self.terminal.delete("1.0", tk.END)
-        self.terminal.config(state="disabled")
+    def handle_export_data(self):
+        """Handle advanced data export"""
+        export_window = ExportDialog(self, self.data_processor, self.file_handler)
+
+    def toggle_scroll_pause(self):
+        """Toggle scroll pause/resume"""
+        if self.scroll_controller.paused:
+            self.scroll_controller.resume()
+            self.pause_button.configure(text="Pause Scroll")
+        else:
+            self.scroll_controller.pause()
+            self.pause_button.configure(text="Resume Scroll")
 
     def refresh_ports(self):
         self.port_map.clear()
@@ -296,6 +772,7 @@ class SerialMonitorGUI(ctk.CTk):
             self.port_combo, self.baud_combo, self.connect_button,
             self.terminal, self.port_map, self.get_button_style
         )
+        
         if self.serial_comm.connect(port, baud):
             self.connect_button.configure(text="Disconnect", fg_color=config.BUTTON_STYLES["red"][0],
                                           hover_color=config.BUTTON_STYLES["red"][1])
@@ -369,111 +846,10 @@ class SerialMonitorGUI(ctk.CTk):
         return "break"
 
     def handle_save_log(self):
-        filename = filedialog.asksaveasfilename(
-            title="Save Log",
-            filetypes=[("Text File", "*.txt"), ("Excel File", "*.xls")]
-        )
-        if filename:
-            log_text = self.terminal.get("1.0", tk.END)
-            save_log(log_text, filename)
-            self.append_text(f"💾 Log saved to {filename}")
+        """Enhanced log saving with format options"""
+        log_text = self.terminal.get("1.0", tk.END)
+        if self.file_handler.save_log(log_text):
+            self.append_text("💾 Log saved successfully\n")
 
     def get_button_style(self, color):
         return config.BUTTON_STYLES.get(color, config.BUTTON_STYLES["green"])
-
-    def open_add_command_window(self):
-        win = ctk.CTkToplevel(self)
-        win.title("Add Command")
-        win_width, win_height = 300, 180
-        self.update_idletasks()
-        x = self.winfo_x() + (self.winfo_width() - win_width) // 2
-        y = self.winfo_y() + (self.winfo_height() - win_height) // 2
-        win.geometry(f"{win_width}x{win_height}+{x}+{y}")
-        win.transient(self)
-        win.grab_set()
-
-        # --- Fields ---
-        ctk.CTkLabel(win, text="Name:", font=config.DEFAULT_FONT) \
-            .grid(row=0, column=0, padx=5, pady=5, sticky="e")
-        name_e = ctk.CTkEntry(win, font=config.DEFAULT_FONT)
-        name_e.grid(row=0, column=1, padx=5, pady=5, sticky="w")
-
-        ctk.CTkLabel(win, text="Command:", font=config.DEFAULT_FONT) \
-            .grid(row=1, column=0, padx=5, pady=5, sticky="e")
-        cmd_e = ctk.CTkEntry(win, font=config.DEFAULT_FONT)
-        cmd_e.grid(row=1, column=1, padx=5, pady=5, sticky="w")
-
-        term_var = tk.BooleanVar(value=True)
-        ctk.CTkCheckBox(
-            win, text="Append \\r\\n", variable=term_var,
-            font=config.DEFAULT_FONT
-        ).grid(row=2, column=0, columnspan=2, pady=5)
-
-        def _save():
-            name = name_e.get().strip()
-            cmd  = cmd_e.get()
-            term = "\r\n" if term_var.get() else ""
-            if name and cmd:
-                self.cmd_manager.add(name, cmd, term)
-                # update dropdown and enable Send Command
-                names = self.cmd_manager.names()
-                self.cmd_dropdown.configure(values=names)
-                self.cmd_dropdown.set(names[0])
-                self.send_cmd_button.configure(state="normal")
-                win.destroy()
-
-        ctk.CTkButton(
-            win, text="Save", command=_save, font=config.DEFAULT_FONT
-        ).grid(row=3, column=0, columnspan=2, pady=10)
-
-    def start_repeat(self):
-        # disable the checkbox, enable Stop
-        self.repeat_checkbox.configure(state="disabled")
-        self.stop_repeat_button.configure(state="normal")
-        interval = 1000
-        try:
-            interval = int(self.interval_entry.get())
-        except ValueError:
-            pass
-        # schedule first send
-        self._repeat_id = self.after(interval, self._repeat_send)
-
-    def _repeat_send(self):
-        sel = self.cmd_dropdown.get()
-        data = self.cmd_manager.get(sel)
-        if data and self.serial_comm and self.serial_comm.serial_port.is_open:
-            self.serial_comm.send_message(data["cmd"] + data["terminator"])
-        # schedule next
-        interval = 1000
-        try:
-            interval = int(self.interval_entry.get())
-        except ValueError:
-            pass
-        self._repeat_id = self.after(interval, self._repeat_send)
-
-    def stop_repeat(self):
-        # cancel the after() loop
-        if hasattr(self, "_repeat_id"):
-            self.after_cancel(self._repeat_id)
-            del self._repeat_id
-        # re-enable controls
-        self.repeat_var.set(False)
-        self.repeat_checkbox.configure(state="normal")
-        self.stop_repeat_button.configure(state="disabled")
-
-    def send_command(self):
-        """Send the selected saved command over serial (if any)."""
-        sel = self.cmd_dropdown.get()
-        # nothing to do if no commands
-        if sel == "No saved commands":
-            return
-
-        data = self.cmd_manager.get(sel)
-        if not data:
-            return
-
-        cmd = data["cmd"] + data["terminator"]
-        if self.serial_comm \
-        and self.serial_comm.serial_port \
-        and self.serial_comm.serial_port.is_open:
-            self.serial_comm.send_message(cmd)
