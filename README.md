@@ -243,8 +243,6 @@ This project is licensed under the GPL3 License. See the LICENSE file for detail
 ## Contact
 
 For questions or feedback:
-
-- Email: s.dvid@hotmail.com
-- GitHub: [DvidMakesThings](https://github.com/DvidMakesThings)
-
+- **Email:** [dvidmakesthings@gmail.com](mailto:dvidmakesthings@gmail.com)
+- **GitHub:** [DvidMakesThings](https://github.com/DvidMakesThings)
 
